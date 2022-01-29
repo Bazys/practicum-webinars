@@ -9,17 +9,25 @@ import (
 
 const limit = 30
 
-type api struct {
-	db *sqlx.DB
-}
-
 type Video struct {
 	Id    string `db:"id"`
 	Title string `db:"title"`
 	Views int64  `db:"views"`
 }
 
-func (a *api) videos(w http.ResponseWriter, r *http.Request) {
+type api struct {
+	db *sqlx.DB
+}
+
+type Api interface {
+	Videos(http.ResponseWriter, *http.Request)
+}
+
+func NewApi(db *sqlx.DB) Api {
+	return &api{db: db}
+}
+
+func (a *api) Videos(w http.ResponseWriter, r *http.Request) {
 	var videos []Video
 
 	err := a.db.SelectContext(r.Context(), &videos, `SELECT id, title, views FROM videos ORDER BY views LIMIT ?`, limit)
@@ -42,8 +50,8 @@ func main() {
 		panic(err)
 	}
 	defer db.Close()
-	app := &api{db: db}
-	http.HandleFunc("/posts", app.videos)
+	app := NewApi(db)
+	http.HandleFunc("/videos", app.Videos)
 	http.ListenAndServe(":8080", nil)
 }
 

@@ -1,3 +1,7 @@
+gomod:
+	@echo "Run go mod tidy"
+	go mod tidy
+
 lint:
 	@echo "Running linter checks"
 	golangci-lint run

@@ -7,11 +7,26 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Bazys/practicum-webinars/videos/mocks"
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jmoiron/sqlx"
 )
 
-func TestShouldGetPosts(t *testing.T) {
+func TestApi_Videos(t *testing.T) {
+	// request & response для тестов
+	req, err := http.NewRequest("GET", "http://localhost/videos", nil)
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected while creating request", err)
+	}
+	w := httptest.NewRecorder()
+	testObj := new(mocks.Api)
+	testObj.On("Videos", w, req).Return()
+
+	testObj.Videos(w, req)
+	testObj.AssertExpectations(t)
+}
+
+func TestShouldGetVideos(t *testing.T) {
 	mockDB, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -20,9 +35,10 @@ func TestShouldGetPosts(t *testing.T) {
 
 	db := sqlx.NewDb(mockDB, "sqlmock")
 
-	// create app with mocked db, request and response to test
-	app := &api{db}
-	req, err := http.NewRequest("GET", "http://localhost/posts", nil)
+	// создаем app с замоканным драйвером БД
+	app := NewApi(db)
+	// request & response для тестов
+	req, err := http.NewRequest("GET", "http://localhost/videos", nil)
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected while creating request", err)
 	}
@@ -36,7 +52,7 @@ func TestShouldGetPosts(t *testing.T) {
 	mock.ExpectQuery("^SELECT (.+) FROM videos ORDER BY views LIMIT").WillReturnRows(rows)
 
 	// выполняем тестируемую функцию
-	app.videos(w, req)
+	app.Videos(w, req)
 
 	if w.Code != 200 {
 		t.Fatalf("expected status code to be 200, but got: %d", w.Code)
