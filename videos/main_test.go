@@ -66,7 +66,8 @@ func TestShouldGetVideos(t *testing.T) {
 		Videos: []Video{
 			{Id: "1", Title: "name1", Views: 5},
 			{Id: "2", Title: "name2", Views: 15},
-		}}
+		},
+	}
 
 	var actual resp
 

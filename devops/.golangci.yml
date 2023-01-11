@@ -1,0 +1,77 @@
+run:
+  skip-files:
+    - "mocks\\.go$"
+  skip-dirs:
+    - assets
+    - build
+    - test
+  tests: false
+  concurrency: 4
+
+# all available settings of specific linters
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  govet:
+    check-shadowing: false
+    settings:
+      printf:
+        funcs:
+          - printf
+          - debugf
+          - infof
+          - warnf
+          - errorf
+          - fatalf
+          - wrapf
+          - fieldalignment
+  gocyclo:
+    min-complexity: 25
+  maligned:
+    # print struct with more effective memory layout or not, false by default
+    suggest-new: true
+  misspell:
+    locale: US
+  unparam:
+    check-exported: true
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - structcheck
+    - varcheck
+    - deadcode
+    - revive
+    - gosec
+    - unconvert
+    - goconst
+    - misspell
+    - unparam
+    - prealloc
+    - exportloopref
+    - gochecknoinits
+    - gocritic
+    - dupl
+    - gocyclo
+    - goimports
+    - ineffassign
+  fast: false
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - scopelint
+
+  max-per-linter: 0
+  max-same-issues: 0
+  new: false
