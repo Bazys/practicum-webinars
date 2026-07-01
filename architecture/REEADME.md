@@ -1,0 +1,47 @@
+# HOW TO USE
+
+Запускаем сервер:
+
+```sh
+go run main.go
+```
+
+Проверяем успешный кейс (Alice делает заказ):
+
+```sh
+curl -X POST http://localhost:8888/orders \
+-H "Content-Type: application/json" \
+-d '{"user_id":"user-1", "product_id":"prod-1", "quantity":2}'
+```
+
+Ожидаемый ответ: {"id":"order-1","user_id":"user-1","product_id":"prod-1","quantity":2,"total":200,"status":"paid"}
+
+Проверяем кейс с ошибкой биллинга (Bob делает заказ):
+
+```sh
+curl -X POST http://localhost:8888/orders \
+-H "Content-Type: application/json" \
+-d '{"user_id":"user-2", "product_id":"prod-2", "quantity":1}'
+```
+
+Ожидаемый ответ: billing failed: insufficient funds
+
+## проблемы этого кода
+
+### Невозможность тестирования
+
+Как нам протестировать расчет total = price * float64(req.Quantity) без поднятия HTTP-сервера?
+Никак. Функция намертво привязана к http.ResponseWriter.
+
+### Смешение ошибок
+
+HTTP статусы (StatusPaymentRequired) формируются на основе бизнес-правил. Если завтра мы захотим добавить gRPC, нам придется переписывать эту логику.
+
+### Скрытые зависимости
+
+Функция createOrderHandler зависит от глобальных переменных usersDB, productsDB. Это делает её непредсказуемой.
+Нарушение Single Responsibility Principle (SRP): Хендлер занимается всем: парсингом, бизнес-логикой, БД и вызовом внешних API.
+
+## цель следующего шага
+
+Далее мы начнем резать этот монолит. Первым делом мы выделим бизнес-правила (домен) и вынесем его в отдельный пакет internal/domain, чтобы он перестал знать о существовании net/http и баз данных.
