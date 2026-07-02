@@ -66,3 +66,30 @@ webinar-architecture/
 На следующем шаге мы выделим Инфраструктурный слой
 (пакеты repository и integration) и посмотрим,
 как internal защищает наш домен от внешнего мира.
+
+## Финальная сборка Clean Architecture
+
+```text
+webinar-architecture/
+├── go.mod
+├── main.go                           <-- ТОЛЬКО сборка зависимостей (Composition Root)
+└── internal/
+    ├── domain/
+    │   └── order.go                  <-- (Без изменений)
+    ├── service/
+    │   └── order_service.go          <-- (Без изменений)
+    ├── repository/
+    │   └── memory/
+    │       ├── user.go               <-- Адаптер БД пользователей
+    │       ├── product.go            <-- Адаптер БД товаров
+    │       └── order.go              <-- Адаптер БД заказов
+    ├── integration/
+    │   └── billing.go                <-- Адаптер внешнего сервиса биллинга
+    └── transport/
+        └── http/
+            └── handler.go            <-- HTTP хендлеры
+```
+
+Мы создаем пакет memory, чтобы показать,
+что это конкретная реализация (in-memory).
+Завтра мы напишем пакет internal/repository/postgres.
