@@ -3,28 +3,15 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
+
+	"webinars/architecture/internal/domain"
+	"webinars/architecture/internal/service"
 )
 
-// --- Модели (смешанные в одном файле) ---
-
-type OrderRequest struct {
-	UserID    string `json:"user_id"`
-	ProductID string `json:"product_id"`
-	Quantity  int    `json:"quantity"`
-}
-
-type Order struct {
-	ID        string  `json:"id"`
-	UserID    string  `json:"user_id"`
-	ProductID string  `json:"product_id"`
-	Quantity  int     `json:"quantity"`
-	Total     float64 `json:"total"`
-	Status    string  `json:"status"`
-}
+var ErrInsufficientFunds = errors.New("insufficient funds")
 
 // --- Эмуляция инфраструктуры (БД и Внешние сервисы) ---
 
@@ -39,79 +26,120 @@ var (
 		"prod-2": 50.0,
 	}
 
-	ordersDB = make(map[string]Order)
+	ordersDB = make(map[string]domain.Order)
 	mu       sync.Mutex
 )
 
-// --- HTTP Хендлер (Тот самый спагетти-код) ---
+// MockUserRepo реализует service.UserChecker
+type MockUserRepo struct{}
 
-func createOrderHandler(w http.ResponseWriter, r *http.Request) {
-	// 1. Транспортный слой: парсинг HTTP
+func (m *MockUserRepo) GetUserName(userID string) (string, error) {
+	name, ok := usersDB[userID]
+	if !ok {
+		return "", service.ErrUserNotFound
+	}
+	return name, nil
+}
+
+// MockProductRepo реализует service.ProductInfoProvider
+type MockProductRepo struct{}
+
+func (m *MockProductRepo) GetPrice(productID string) (float64, error) {
+	price, ok := productsDB[productID]
+	if !ok {
+		return 0, errors.New("product not found")
+	}
+	return price, nil
+}
+
+// MockOrderRepo реализует service.OrderSaver
+type MockOrderRepo struct{}
+
+func (m *MockOrderRepo) Save(order *domain.Order) error {
+	mu.Lock()
+	defer mu.Unlock()
+	ordersDB[order.ID] = *order
+	return nil
+}
+
+// MockBilling реализует service.PaymentProcessor
+type MockBilling struct{}
+
+func (m *MockBilling) Charge(userID string, amount float64) error {
+	// Эмулируем ошибку биллинга для Bob
+	if userID == "user-2" {
+		return ErrInsufficientFunds
+	}
+	return nil
+}
+
+// --- HTTP ТРАНСПОРТ ---
+
+type OrderRequest struct {
+	UserID    string `json:"user_id"`
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
+// orderService инжектится в хендлер
+type OrderHandler struct {
+	svc *service.OrderService
+}
+
+func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	var req OrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// 2. Бизнес-логика: валидация
-	if req.Quantity <= 0 {
-		http.Error(w, "quantity must be positive", http.StatusBadRequest)
+	// Вызываем Use Case
+	order, err := h.svc.CreateOrder(req.UserID, req.ProductID, req.Quantity)
+	if err != nil {
+		// Маппинг доменных/инфраструктурных ошибок в HTTP статусы (Error Architecture)
+		if service.IsUserNotFoundError(err) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrProductNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		// Проверяем, есть ли внутри ошибка биллинга
+		if errors.Is(err, ErrInsufficientFunds) { // В реальном проекте лучше использовать свой тип ошибки BillingError
+			http.Error(w, "billing failed: insufficient funds", http.StatusPaymentRequired)
+			return
+		}
+
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		log.Printf("Error creating order: %v", err)
 		return
 	}
 
-	// 3. Инфраструктура: проверка пользователя в БД
-	userName, ok := usersDB[req.UserID]
-	if !ok {
-		http.Error(w, "user not found", http.StatusNotFound)
-		return
-	}
-
-	// 4. Инфраструктура: проверка товара и получение цены
-	price, ok := productsDB[req.ProductID]
-	if !ok {
-		http.Error(w, "product not found", http.StatusNotFound)
-		return
-	}
-
-	// 5. Бизнес-логика: расчет стоимости
-	total := price * float64(req.Quantity)
-
-	// 6. Доменная логика: создание сущности
-	order := Order{
-		ID:        fmt.Sprintf("order-%d", len(ordersDB)+1),
-		UserID:    req.UserID,
-		ProductID: req.ProductID,
-		Quantity:  req.Quantity,
-		Total:     total,
-		Status:    "pending_payment",
-	}
-
-	// 7. Инфраструктура: вызов внешнего сервиса Billing
-	// Эмулируем вызов. Представим, что здесь http.Post к микросервису биллинга.
-	// По легенде, у пользователя "Bob" (user-2) нет денег.
-	if userName == "Bob" {
-		// Проблема: мы возвращаем HTTP статус из бизнес-логики!
-		http.Error(w, "billing failed: insufficient funds", http.StatusPaymentRequired)
-		return
-	}
-	order.Status = "paid"
-
-	// 8. Инфраструктура: сохранение в БД
-	mu.Lock()
-	ordersDB[order.ID] = order
-	mu.Unlock()
-
-	// 9. Транспортный слой: формирование ответа
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(order)
 }
 
 func main() {
-	http.HandleFunc("/orders", createOrderHandler)
+	// 1. Инициализация адаптеров (Инфраструктура)
+	userRepo := &MockUserRepo{}
+	productRepo := &MockProductRepo{}
+	orderRepo := &MockOrderRepo{}
+	billing := &MockBilling{}
 
-	log.Println("Spaghetti Server starting on :8080...")
-	if err := http.ListenAndServe(":8888", nil); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	// 2. Сборка графа зависимостей (DI)
+	orderService := service.NewOrderService(userRepo, productRepo, orderRepo, billing)
+
+	// 3. Инициализация HTTP хендлеров с зависимостями
+	handler := &OrderHandler{svc: orderService}
+
+	// 4. Запуск сервера
+	mux := http.NewServeMux()
+	mux.HandleFunc("/orders", handler.CreateOrder)
+
+	log.Println("Clean Architecture (Step 1) Server starting on :8080...")
+	if err := http.ListenAndServe(":8888", mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

@@ -1,6 +1,6 @@
 module webinars
 
-go 1.22.2
+go 1.26.3
 
 require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
