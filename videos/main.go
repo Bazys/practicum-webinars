@@ -1,80 +1,104 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const limit = 30
-
-type Video struct {
-	Id    string `db:"id"`
-	Title string `db:"title"`
-	Views int64  `db:"views"`
-}
-
-type api struct {
-	db *sqlx.DB
-}
-
-type Api interface {
-	Videos(http.ResponseWriter, *http.Request)
-}
-
-func NewApi(db *sqlx.DB) Api {
-	return &api{db: db}
-}
-
-func (a *api) Videos(w http.ResponseWriter, r *http.Request) {
-	var videos []Video
-
-	err := a.db.SelectContext(r.Context(), &videos, `SELECT id, title, views FROM videos ORDER BY views LIMIT ?`, limit)
-	if err != nil {
-		a.fail(w, "failed to fetch posts: "+err.Error(), 500)
-		return
-	}
-
-	data := struct {
-		Videos []Video
-	}{videos}
-
-	a.ok(w, data)
-}
+// DSN по умолчанию совпадает с docker-compose.yaml (user/pass/db = postgres).
+// В проде DSN обязательно берётся из конфига/env, никогда не хардкодится.
+const defaultDSN = "postgres://postgres:postgres@localhost:5432/my_database?sslmode=disable"
 
 func main() {
-	dsn := "user=postgres password=postgres dbname=my_database sslmode=disable"
-	db, err := sqlx.Open("postgres", dsn)
+	dsn := envOr("DATABASE_URL", defaultDSN)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// 1. Пул соединений.
+	//
+	// pgxpool.NewWithConfig позволяет настроить лимиты — это КРИТИЧНО для прода:
+	//   - MaxConns         — верхняя граница одновременных соединений (по умолчанию max(4, runtime.NumCPU));
+	//   - MinConns         — "тёплые" соединения, которые держим всегда;
+	//   - MaxConnLifetime  — как часто пересоздавать соединение (защита от протухания);
+	//   - MaxConnIdleTime  — когда закрывать простаивающее соединение.
+	// Если лимиты не задать, под нагрузкой можно либо исчерпать соединения в БД,
+	// либо наоборот держать слишком много "лишних".
+	pool, err := newPool(ctx, dsn)
 	if err != nil {
-		panic(err)
+		log.Fatalf("pgxpool: %v", err)
 	}
-	defer db.Close()
-	app := NewApi(db)
-	http.HandleFunc("/videos", app.Videos)
-	http.ListenAndServe(":8080", nil)
+	defer pool.Close()
+
+	// 2. Миграции (накатываются при старте приложения).
+	if err := runMigrations(ctx, dsn); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+
+	// 3. Приложение.
+	repo := NewVideoRepository(pool)
+	api := NewAPI(repo)
+
+	srv := &http.Server{
+		Addr:              ":8080",
+		Handler:           api.Routes(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		log.Print("listening on :8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+
+	// 4. Graceful shutdown: ждём сигнала и аккуратно гасим сервер и пул.
+	<-ctx.Done()
+	log.Print("shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown: %v", err)
+	}
 }
 
-func (a *api) fail(w http.ResponseWriter, msg string, status int) {
-	w.Header().Set("Content-Type", "application/json")
+// newPool создаёт настроенный пул соединений и проверяет подключение.
+func newPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConns = 10
+	cfg.MinConns = 2
+	cfg.MaxConnLifetime = 30 * time.Minute
+	cfg.MaxConnIdleTime = 5 * time.Minute
 
-	data := struct {
-		Error string
-	}{Error: msg}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
 
-	resp, _ := json.Marshal(data)
-	w.WriteHeader(status)
-	w.Write(resp)
+	// Пингуем с таймаутом, чтобы сразу падать, если БД недоступна.
+	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
 }
 
-func (a *api) ok(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-
-	resp, err := json.Marshal(data)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		a.fail(w, "oops something evil has happened", 500)
-		return
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	w.Write(resp)
+	return fallback
 }
