@@ -29,8 +29,8 @@ run:
 	go run .
 
 # Поднять локальный Postgres (как на слайде docker-compose).
-docker-up:
+up:
 	docker compose up -d
 
-docker-down:
+down:
 	docker compose down
