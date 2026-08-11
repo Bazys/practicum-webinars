@@ -60,3 +60,6 @@ __debug_bin
 # System Files
 .DS_Store
 Thumbs.db
+.venv
+concurrency/assets
+.zcode
