@@ -41,5 +41,5 @@ func ScaleFix[S ~[]E, E Integer](s S, c E) S {
 
 func ScaleAndPrintFix(p Point) {
 	r := ScaleFix(p, 2)
-	fmt.Println(r.String()) // DOES NOT COMPILE
+	fmt.Println(r.String()) // OK: r имеет тип Point
 }

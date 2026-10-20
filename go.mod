@@ -1,17 +1,17 @@
 module webinars
 
-go 1.26
+go 1.27
 
 require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0
+	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.64.0
 )
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240604185151-ef581f913117 // indirect

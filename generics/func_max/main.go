@@ -12,8 +12,8 @@ func Max[T cmp.Ordered](s []T) T {
 		panic("slice is empty")
 	}
 	m := s[0]
-	for i := range s[1:] {
-		m = max(m, s[i])
+	for _, v := range s[1:] {
+		m = max(m, v)
 	}
 	return m
 }

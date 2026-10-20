@@ -62,3 +62,7 @@ Thumbs.db
 .venv
 concurrency/assets
 .zcode
+.serena
+.pprof-demo
+pprof/materials/measurements
+*/**/.memos.md
